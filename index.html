@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clinical Dictation App</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#ffffff">
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    button { margin: 10px; padding: 10px; }
+    #recordingsList { margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <h1>Clinical Dictation</h1>
+  <button id="startBtn" aria-label="Start recording dictation">Start Recording</button>
+  <button id="stopBtn" aria-label="Stop recording dictation" disabled>Stop Recording</button>
+  <p id="status" role="status" aria-live="polite"></p>
+
+  <h2>Previous Recordings</h2>
+  <ul id="recordingsList"></ul>
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('service-worker.js')
+        .then(() => console.log('Service Worker registered'))
+        .catch(err => console.error('Service Worker registration failed:', err));
+    }
+
+    let mediaRecorder;
+    let audioChunks = [];
+
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const status = document.getElementById('status');
+    const recordingsList = document.getElementById('recordingsList');
+
+    function updateRecordingsList() {
+      recordingsList.innerHTML = '';
+      const recordings = JSON.parse(localStorage.getItem('recordings') || '[]');
+      recordings.forEach(rec => {
+        const li = document.createElement('li');
+        li.innerHTML = `<a href="${rec.url}" download="${rec.filename}">${rec.filename}</a>`;
+        recordingsList.appendChild(li);
+      });
+    }
+
+    startBtn.onclick = async () => {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorder = new MediaRecorder(stream);
+      audioChunks = [];
+
+      mediaRecorder.ondataavailable = event => {
+        audioChunks.push(event.data);
+      };
+
+      mediaRecorder.onstop = async () => {
+        const blob = new Blob(audioChunks, { type: 'audio/webm' });
+        const dateTime = new Date().toISOString().replace(/[:.]/g, '-');
+        const filename = `dictation-${dateTime}.webm`;
+        const url = URL.createObjectURL(blob);
+
+        const recordings = JSON.parse(localStorage.getItem('recordings') || '[]');
+        recordings.push({ filename, url });
+        localStorage.setItem('recordings', JSON.stringify(recordings));
+        updateRecordingsList();
+
+        try {
+          const formData = new FormData();
+          formData.append('file', blob, filename);
+
+          await fetch('https://m365.cloud.microsoft:443/chat/?titleId=T_46d55beb-e011-c92d-c641-28fdb5ec52eb&source=embedded-builder', {
+            method: 'POST',
+            body: formData
+          });
+
+          status.textContent = '✅ Dictation sent successfully!';
+        } catch (error) {
+          status.textContent = '❌ Failed to send dictation.';
+          console.error(error);
+        }
+      };
+
+      mediaRecorder.start();
+      status.textContent = '🎙️ Recording...';
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+    };
+
+    stopBtn.onclick = () => {
+      mediaRecorder.stop();
+      status.textContent = '⏹️ Stopped recording.';
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+    };
+
+    updateRecordingsList();
+  </script>
+</body>
+</html>
